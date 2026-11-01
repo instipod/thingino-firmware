@@ -156,6 +156,15 @@ endef
 USBNET_POST_INSTALL_TARGET_HOOKS += USBNET_INSTALL_QMI_CONNECT
 endif
 
+ifeq ($(BR2_PACKAGE_THINGINO_WEBUI),y)
+USBNET_DEPENDENCIES += thingino-webui
+define USBNET_INSTALL_MIFI_STATUS
+	$(INSTALL) -D -m 0755 $(USBNET_PKGDIR)/files/mifi-status.cgi \
+		$(TARGET_DIR)/var/www/x/mifi-status.cgi
+endef
+USBNET_POST_INSTALL_TARGET_HOOKS += USBNET_INSTALL_MIFI_STATUS
+endif
+
 define USBNET_INSTALL_MODULE_LIST
 	$(if $(strip $(USBNET_MODULES)), \
 		mkdir -p $(TARGET_DIR)/etc/modules.d; \
