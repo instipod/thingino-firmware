@@ -53,6 +53,20 @@ wait_for() {
 	return 1
 }
 
+# Some firmware ignores the 802.3 request; follow whatever the modem chose.
+set_link_mode() {
+	local want=N sysfs="/sys/class/net/$iface/qmi/raw_ip"
+	qmi --wda-get-data-format 2>/dev/null | grep -q '"link-layer-protocol": *"raw-ip"' && want=Y
+	if [ ! -e "$sysfs" ]; then
+		[ "$want" = Y ] && log_msg "modem only supports raw-ip, kernel does not" && return 1
+		return 0
+	fi
+	[ "$(cat "$sysfs")" = "$want" ] && return 0
+	ip link set "$iface" down
+	echo "$want" >"$sysfs" || return 1
+	log_msg "link mode: $([ "$want" = Y ] && echo raw-ip || echo 802.3)"
+}
+
 start_dhcp() {
 	local pid
 	pid=$(cat "$RUN_DIR/$name.udhcpc" 2>/dev/null)
@@ -103,6 +117,7 @@ connect() {
 	qmi --set-device-operating-mode online >/dev/null 2>&1
 	qmi --wda-set-data-format 802.3 >/dev/null 2>&1
 	qmi --set-data-format 802.3 >/dev/null 2>&1
+	set_link_mode || return 1
 
 	if ! wait_for 60 '"registration":"registered"' --get-serving-system; then
 		log_msg "not registered on a network"
