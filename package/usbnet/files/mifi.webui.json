@@ -1,0 +1,31 @@
+{
+  "name": "mifi",
+  "label": "MiFi",
+  "apiVersion": 1,
+  "nav": [
+    {
+      "section": "ddInfo",
+      "position": "after:Info: lsmod",
+      "items": [
+        {
+          "label": "Info: MiFi",
+          "href": "/info-mifi.html"
+        }
+      ]
+    }
+  ],
+  "styles": [],
+  "preview": {
+    "scripts": [],
+    "html": null
+  },
+  "featureFlags": {
+    "mifi": true
+  },
+  "cgi": [
+    "/x/mifi-status.cgi"
+  ],
+  "pages": [
+    "/info-mifi.html"
+  ]
+}

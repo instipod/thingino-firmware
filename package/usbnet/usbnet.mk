@@ -161,6 +161,12 @@ USBNET_DEPENDENCIES += thingino-webui
 define USBNET_INSTALL_MIFI_STATUS
 	$(INSTALL) -D -m 0755 $(USBNET_PKGDIR)/files/mifi-status.cgi \
 		$(TARGET_DIR)/var/www/x/mifi-status.cgi
+	$(INSTALL) -D -m 0644 $(USBNET_PKGDIR)/files/www/info-mifi.html \
+		$(TARGET_DIR)/var/www/info-mifi.html
+	$(INSTALL) -D -m 0644 $(USBNET_PKGDIR)/files/www/a/info-mifi.js \
+		$(TARGET_DIR)/var/www/a/info-mifi.js
+	$(INSTALL) -D -m 0644 $(USBNET_PKGDIR)/files/mifi.webui.json \
+		$(TARGET_DIR)/var/www/a/plugins/mifi.webui.json
 endef
 USBNET_POST_INSTALL_TARGET_HOOKS += USBNET_INSTALL_MIFI_STATUS
 endif
