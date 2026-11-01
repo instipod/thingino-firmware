@@ -1,0 +1,187 @@
+#!/bin/sh
+# shellcheck disable=SC3043
+
+DAEMON="/usr/sbin/gpsd"
+PIDFILE="/run/gpsd.pid"
+STATE="/run/gpsd.source"
+MODE_FILE="/run/gpsd.mode"
+LOCK="/run/gpsd.lock"
+PENDING="/run/gpsd.pending"
+CONFIG_JSON="/etc/thingino.json"
+MIFI_SOURCE="tcp://192.168.1.1:11010"
+SETTLE=3
+
+log_msg() {
+	logger -t gps-select "$*"
+}
+
+cfg() {
+	jct "$CONFIG_JSON" get "gps.$1" 2>/dev/null | tr -d '"\r\n'
+}
+
+# Prints the ttyUSB node bound to interface $2 of USB device $1.
+tty_on() {
+	local t intf
+	for t in /sys/class/tty/ttyUSB*; do
+		[ -e "$t/device" ] || continue
+		intf=$(readlink -f "$t/device/..")
+		[ "${intf%/*}" = "$1" ] || continue
+		[ "$(cat "$intf/bInterfaceNumber" 2>/dev/null)" = "$2" ] || continue
+		echo "/dev/${t##*/}"
+		return 0
+	done
+	return 1
+}
+
+# Sets nmea_dev, at_dev and at_cmd for the first GPS-capable modem.
+find_modem() {
+	local t usb nmea_if at_if
+	nmea_dev=$(cfg modem_nmea)
+	at_dev=$(cfg modem_at)
+	at_cmd=$(cfg modem_init)
+	if [ -n "$nmea_dev" ]; then
+		[ -c "$nmea_dev" ]
+		return
+	fi
+
+	for t in /sys/class/tty/ttyUSB*; do
+		[ -e "$t/device" ] || continue
+		usb=$(readlink -f "$t/device/../..")
+		case "$(cat "$usb/idVendor" 2>/dev/null)" in
+			2c7c | 05c6)
+				nmea_if=01 at_if=02 at_cmd=${at_cmd:-AT+QGPS=1}
+				;;
+			1199)
+				nmea_if=02 at_if=02 at_cmd=${at_cmd:-\$GPS_START}
+				;;
+			*)
+				continue
+				;;
+		esac
+		nmea_dev=$(tty_on "$usb" "$nmea_if") || continue
+		[ -n "$at_dev" ] || at_dev=$(tty_on "$usb" "$at_if")
+		return 0
+	done
+	return 1
+}
+
+enable_modem_gps() {
+	[ -n "$at_dev" ] && [ -n "$at_cmd" ] && [ -c "$at_dev" ] || return 0
+	timeout 3 sh -c 'printf "%s\r" "$1" >"$2"' sh "$at_cmd" "$at_dev" 2>/dev/null
+}
+
+# busybox nc exits 1 on refused or -w connect timeout; anything else means
+# the connection was made and later cut by timeout.
+mifi_up() {
+	local hp
+	case "$MIFI_SOURCE" in
+		tcp://*) ;;
+		'') return 1 ;;
+		/dev/*) [ -c "$MIFI_SOURCE" ]; return ;;
+		*) return 0 ;;
+	esac
+	hp=${MIFI_SOURCE#tcp://}
+	timeout 3 nc -w 2 "${hp%:*}" "${hp##*:}" </dev/null >/dev/null 2>&1
+	[ $? -ne 1 ]
+}
+
+pick_source() {
+	mode=""
+	source=""
+	[ "$(cfg enabled)" = "false" ] && return 1
+	if find_modem; then
+		mode="modem"
+		source="$nmea_dev"
+	elif mifi_up; then
+		mode="mifi"
+		source="$MIFI_SOURCE"
+	else
+		return 1
+	fi
+}
+
+running() {
+	local pid
+	pid=$(cat "$PIDFILE" 2>/dev/null)
+	[ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+start_gpsd() {
+	[ "$mode" = "modem" ] && enable_modem_gps
+	# -n: poll the source at once instead of waiting for a client
+	# -G: accept clients on all interfaces, not just loopback
+	start-stop-daemon -S -p "$PIDFILE" -x "$DAEMON" -- -n -G -P "$PIDFILE" "$source" \
+		</dev/null >/dev/null 2>&1 8>&- 9>&-
+	echo "$source" >"$STATE"
+	echo "$mode" >"$MODE_FILE"
+	log_msg "using $mode GPS: $source"
+}
+
+stop_gpsd() {
+	if [ -f "$PIDFILE" ]; then
+		start-stop-daemon -K -q -p "$PIDFILE" -x "$DAEMON"
+		rm -f "$PIDFILE"
+	else
+		start-stop-daemon -K -q -x "$DAEMON"
+	fi
+	[ -s "$STATE" ] && log_msg "stopped gpsd"
+	rm -f "$STATE" "$MODE_FILE"
+}
+
+apply() {
+	local current
+	current=$(cat "$STATE" 2>/dev/null)
+	pick_source
+	if [ "$source" = "$current" ]; then
+		[ -z "$source" ] || running && return 0
+	fi
+	stop_gpsd
+	[ -n "$source" ] || return 0
+	start_gpsd
+}
+
+locked() {
+	exec 9>"$LOCK"
+	flock 9
+	"$@"
+}
+
+# Collapses a burst of events (one per ttyUSB port) into one pass.
+settle() {
+	exec 8>"$PENDING"
+	flock -n 8 || exit 0
+	sleep "$SETTLE"
+	exec 9>"$LOCK"
+	flock 9
+	exec 8>&-
+	apply
+}
+
+case "$1" in
+	start)
+		locked apply
+		cat "$STATE" 2>/dev/null
+		;;
+	stop)
+		locked stop_gpsd
+		;;
+	hotplug)
+		setsid "$0" settle </dev/null >/dev/null 2>&1 &
+		;;
+	settle)
+		settle
+		;;
+	status)
+		if running; then
+			echo "gpsd running on $(cat "$STATE" 2>/dev/null)"
+		else
+			echo "gpsd not running"
+		fi
+		;;
+	*)
+		echo "Usage: $0 {start|stop|hotplug|status}"
+		exit 1
+		;;
+esac
+
+exit 0

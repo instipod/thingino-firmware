@@ -8,8 +8,17 @@ config BR2_PACKAGE_THINGINO_GPSD
 	select BR2_PACKAGE_GPSD_CLIENTS
 	help
 	  Installs gpsd with its client tools (gpspipe, gpsctl, ...) and
-	  an init script that starts gpsd on boot.
+	  gps-select, which runs gpsd on the best available source and
+	  re-evaluates whenever a USB serial port appears or goes away
+	  and on DHCP events:
 
-	  The GPS source is taken from BR2_PACKAGE_GPSD_DEVICES and may be
-	  a serial device or a network source such as
-	  tcp://192.168.1.1:11010 or udp://0.0.0.0:11010.
+	  1. the NMEA port of a USB modem (Quectel, Qualcomm, Sierra),
+	     with GPS switched on via AT command;
+	  2. the fallback source from BR2_PACKAGE_GPSD_DEVICES, e.g.
+	     tcp://192.168.1.1:11010 for a MiFi, used only while its TCP
+	     port accepts connections (a /dev node only while present);
+	  3. otherwise gpsd is not running.
+
+	  Optional keys in the "gps" object of /etc/thingino.json:
+	  enabled (false disables gpsd), modem_nmea (NMEA tty),
+	  modem_at (AT tty), modem_init (command sent to modem_at).

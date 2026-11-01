@@ -3,29 +3,15 @@
 # shellcheck source=/dev/null
 . /etc/init.d/lib-log
 
-DAEMON="/usr/sbin/gpsd"
-PIDFILE="/run/gpsd.pid"
-DEVICES="/dev/ttyS1"
-
 start() {
 	log -c 15 "Starting gpsd"
-	log -c 240 -e "- source: $DEVICES"
-
-	# -n: poll the source at once instead of waiting for a client
-	# -G: accept clients on all interfaces, not just loopback
-	# shellcheck disable=SC2086
-	start-stop-daemon -S -p "$PIDFILE" -x "$DAEMON" -- -n -G -P "$PIDFILE" $DEVICES
+	src=$(gps-select start)
+	log -c 240 -e "- source: ${src:-none, waiting for modem or MiFi}"
 }
 
 stop() {
 	log -c 15 "Stopping gpsd"
-
-	if [ -f "$PIDFILE" ]; then
-		start-stop-daemon -K -p "$PIDFILE" -x "$DAEMON"
-		rm -f "$PIDFILE"
-	else
-		start-stop-daemon -K -x "$DAEMON"
-	fi
+	gps-select stop
 }
 
 case "$1" in

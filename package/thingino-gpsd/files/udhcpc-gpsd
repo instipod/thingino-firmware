@@ -1,0 +1,9 @@
+#!/bin/sh
+
+case "$1" in
+	bound | deconfig | leasefail | nak)
+		/usr/sbin/gps-select hotplug
+		;;
+esac
+
+exit 0

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>thingino · GPS</title>
+  <script src="/a/theme-init.js"></script>
+  <link rel="icon" type="image/svg+xml" href="/a/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+    integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="/a/main.css">
+</head>
+
+<body id="page-info-gps">
+<nav data-app-nav></nav>
+
+<main class="pb-4">
+  <div class="container" style="min-height:80vh">
+    <div data-app-controls></div>
+
+    <section class="card shadow-sm mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+        <div>
+          <h5 class="mb-0">GPS</h5>
+          <p class="text-secondary small mb-0">gpsd source, position and fix quality.</p>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="gps-auto" checked>
+            <label class="form-check-label small" for="gps-auto">Auto-refresh</label>
+          </div>
+          <button type="button" class="btn btn-outline-secondary" id="gps-refresh">
+            <i class="bi bi-arrow-clockwise"></i> Reload
+          </button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="gps-error" class="alert alert-danger d-none"></div>
+        <div id="gps-spinner" class="text-center text-secondary py-4">
+          <div class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+          <span>Reading gpsd...</span>
+        </div>
+        <div id="gps-content" class="d-none">
+          <div class="row g-4">
+            <div class="col-md-4">
+              <h6>Service</h6>
+              <table class="table table-sm mb-0">
+                <tbody>
+                  <tr><th class="text-secondary fw-normal">Enabled</th><td id="gps-enabled"></td></tr>
+                  <tr><th class="text-secondary fw-normal">gpsd</th><td id="gps-running"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Source</th><td id="gps-mode"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Device</th><td id="gps-source" class="text-break"></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="col-md-4">
+              <h6>Position</h6>
+              <table class="table table-sm mb-0">
+                <tbody>
+                  <tr><th class="text-secondary fw-normal">Fix</th><td id="gps-fix"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Time (UTC)</th><td id="gps-time"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Latitude</th><td id="gps-lat"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Longitude</th><td id="gps-lon"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Altitude</th><td id="gps-alt"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Speed</th><td id="gps-speed"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Heading</th><td id="gps-track"></td></tr>
+                </tbody>
+              </table>
+              <a id="gps-map" class="small d-none" target="_blank" rel="noopener">Open in OpenStreetMap</a>
+            </div>
+            <div class="col-md-4">
+              <h6>Fix quality</h6>
+              <table class="table table-sm mb-0">
+                <tbody>
+                  <tr><th class="text-secondary fw-normal">Satellites</th><td id="gps-sats"></td></tr>
+                  <tr><th class="text-secondary fw-normal">HDOP</th><td id="gps-hdop"></td></tr>
+                  <tr><th class="text-secondary fw-normal">PDOP</th><td id="gps-pdop"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Horizontal error</th><td id="gps-eph"></td></tr>
+                  <tr><th class="text-secondary fw-normal">Vertical error</th><td id="gps-epv"></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="text-secondary small mt-3" id="gps-updated-at"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer data-app-footer></footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
+  integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+<script src="/a/main.js"></script>
+<script src="/a/runtime-config.js"></script>
+<script src="/a/control-bar.js"></script>
+<script src="/a/navigation.js"></script>
+<script src="/a/footer.js"></script>
+<script src="/a/info-gps.js"></script>
+</body>
+</html>
