@@ -1,0 +1,38 @@
+From: instipod <instipod@instipod.com>
+Subject: [PATCH] build internal libraries static
+
+libqmigen and libcommon are plain ADD_LIBRARY() targets, so with
+BUILD_SHARED_LIBS=ON (Buildroot's default for dynamic builds) they
+become shared objects that uqmi links against, but nothing installs
+them. The resulting uqmi fails to start on the target. Build them
+static so they are linked into the uqmi binary.
+
+Signed-off-by: instipod <instipod@instipod.com>
+---
+ CMakeLists.txt        | 2 +-
+ common/CMakeLists.txt | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -63,7 +63,7 @@ ADD_CUSTOM_TARGET(gen-errors DEPENDS qmi-errors.c)
+ ADD_CUSTOM_TARGET(gen-headers DEPENDS ${service_headers})
+ 
+ INCLUDE_DIRECTORIES(common ${CMAKE_BINARY_DIR})
+-ADD_LIBRARY(qmigen ${service_sources})
++ADD_LIBRARY(qmigen STATIC ${service_sources})
+ ADD_DEPENDENCIES(qmigen gen-headers gen-errors)
+ 
+ ADD_SUBDIRECTORY(common)
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -1,6 +1,6 @@
+ 
+ SET(COMMON_SOURCES qmi-message.c mbim.c utils.c)
+ 
+-ADD_LIBRARY(common ${COMMON_SOURCES})
++ADD_LIBRARY(common STATIC ${COMMON_SOURCES})
+ ADD_DEPENDENCIES(common gen-headers gen-errors)
+ TARGET_INCLUDE_DIRECTORIES(common PRIVATE ${ubox_include_dir} ${blobmsg_json_include_dir} ${json_include_dir} ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
