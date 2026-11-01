@@ -1,0 +1,14 @@
+config BR2_PACKAGE_THINGINO_UQMI
+	bool "thingino-uqmi"
+	depends on !BR2_STATIC_LIBS # thingino-libubox
+	depends on BR2_TOOLCHAIN_HAS_SYNC_4 # thingino-libubox
+	select BR2_PACKAGE_THINGINO_LIBUBOX
+	help
+	  uqmi from OpenWrt, a command line tool to configure LTE modems
+	  in QMI mode, built against thingino-libubox and thingino-jct.
+
+	  Use this instead of Buildroot's uqmi: that one selects
+	  Buildroot's libubox, whose libubox.so replaces the
+	  thingino-libubox build that uhttpd is linked against.
+
+	  https://git.openwrt.org/project/uqmi.git

@@ -91,9 +91,9 @@ config BR2_PACKAGE_USBNET_RNDIS
 config BR2_PACKAGE_USBNET_QMI_WWAN
 	bool "QMI WWAN"
 	depends on BR2_PACKAGE_USBNET
-	depends on !BR2_STATIC_LIBS # uqmi
-	depends on BR2_TOOLCHAIN_HAS_SYNC_4 # uqmi
-	select BR2_PACKAGE_UQMI
+	depends on !BR2_STATIC_LIBS # thingino-uqmi
+	depends on BR2_TOOLCHAIN_HAS_SYNC_4 # thingino-uqmi
+	select BR2_PACKAGE_THINGINO_UQMI
 	help
 	  Select this option to enable the QMI WWAN driver for Qualcomm
 	  based LTE/3G modems, together with uqmi and qmi-connect, which
