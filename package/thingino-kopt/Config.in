@@ -346,6 +346,13 @@ config BR2_PACKAGE_THINGINO_KOPT_DWC2_WIFI_ONLY
 
 endchoice
 
+config BR2_PACKAGE_THINGINO_KOPT_USB_HUB
+	bool "USB Hub Support"
+	help
+	  Allow external USB hubs on the DWC2 port. The Ingenic DWC2 host
+	  does not do split transactions, so full/low-speed devices only
+	  work on a full-speed hub or directly on the port.
+
 endif
 
 config BR2_PACKAGE_THINGINO_KOPT_I2C

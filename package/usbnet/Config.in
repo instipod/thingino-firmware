@@ -88,6 +88,15 @@ config BR2_PACKAGE_USBNET_RNDIS
 	  smartphones in USB tethering mode or cellular modems that expose an
 	  RNDIS interface.
 
+config BR2_PACKAGE_USBNET_QMI_WWAN
+	bool "QMI WWAN"
+	depends on BR2_PACKAGE_USBNET
+	help
+	  Select this option to enable the QMI WWAN driver for Qualcomm
+	  based LTE/3G modems. It only drives the network interface; the
+	  data session must be started over the modem's QMI control
+	  device (/dev/cdc-wdm0) with a tool such as uqmi or qmicli.
+
 config BR2_PACKAGE_USBNET_WWAN_SERIAL
 	bool "WWAN via USB SERIAL"
 	depends on BR2_PACKAGE_USBNET
