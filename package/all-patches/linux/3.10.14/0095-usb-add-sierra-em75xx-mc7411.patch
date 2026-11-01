@@ -1,0 +1,33 @@
+From: instipod <instipod@instipod.com>
+Subject: [PATCH] usb: add Sierra Wireless EM75xx/MC7411 (1199:9091)
+
+Bind qmi_wwan to the QMI interface (8) and qcserial to the DM (0),
+NMEA (2) and AT (3) ports of the 1199:9091 composition, as upstream
+did in 4.15.
+
+Signed-off-by: instipod <instipod@instipod.com>
+---
+diff -ru a/drivers/net/usb/qmi_wwan.c b/drivers/net/usb/qmi_wwan.c
+--- a/drivers/net/usb/qmi_wwan.c	2026-11-01 18:46:58.957862618 +0000
++++ b/drivers/net/usb/qmi_wwan.c	2026-11-01 18:46:58.967863038 +0000
+@@ -580,6 +580,7 @@
+ 	{QMI_FIXED_INTF(0x1199, 0x68a2, 8)},	/* Sierra Wireless MC7710 in QMI mode */
+ 	{QMI_FIXED_INTF(0x1199, 0x68a2, 19)},	/* Sierra Wireless MC7710 in QMI mode */
+ 	{QMI_FIXED_INTF(0x1199, 0x901c, 8)},    /* Sierra Wireless EM7700 */
++	{QMI_FIXED_INTF(0x1199, 0x9091, 8)},	/* Sierra Wireless EM7565 / EM7511 / MC7411 */
+ 	{QMI_FIXED_INTF(0x1bbb, 0x011e, 4)},	/* Telekom Speedstick LTE II (Alcatel One Touch L100V LTE) */
+ 	{QMI_FIXED_INTF(0x2357, 0x0201, 4)},	/* TP-LINK HSUPA Modem MA180 */
+ 	{QMI_FIXED_INTF(0x1bc7, 0x1200, 5)},	/* Telit LE920 */
+diff -ru a/drivers/usb/serial/qcserial.c b/drivers/usb/serial/qcserial.c
+--- a/drivers/usb/serial/qcserial.c	2026-11-01 18:46:58.957862618 +0000
++++ b/drivers/usb/serial/qcserial.c	2026-11-01 18:46:58.967863038 +0000
+@@ -139,6 +139,9 @@
+ 	{USB_DEVICE_INTERFACE_NUMBER(0x1199, 0x901c, 0)},	/* Sierra Wireless EM7700 Device Management */
+ 	{USB_DEVICE_INTERFACE_NUMBER(0x1199, 0x901c, 2)},	/* Sierra Wireless EM7700 NMEA */
+ 	{USB_DEVICE_INTERFACE_NUMBER(0x1199, 0x901c, 3)},	/* Sierra Wireless EM7700 Modem */
++	{USB_DEVICE_INTERFACE_NUMBER(0x1199, 0x9091, 0)},	/* Sierra Wireless EM7565 / EM7511 / MC7411 Device Management */
++	{USB_DEVICE_INTERFACE_NUMBER(0x1199, 0x9091, 2)},	/* Sierra Wireless EM7565 / EM7511 / MC7411 NMEA */
++	{USB_DEVICE_INTERFACE_NUMBER(0x1199, 0x9091, 3)},	/* Sierra Wireless EM7565 / EM7511 / MC7411 Modem */
+ 
+ 	{ }				/* Terminating entry */
+ };

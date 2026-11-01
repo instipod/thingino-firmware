@@ -1,0 +1,31 @@
+From: instipod <instipod@instipod.com>
+Subject: [PATCH] usb: add Quectel EG12/EM12 (2c7c:0512)
+
+Bind qmi_wwan to the QMI interface (4) of the default composition,
+and option to the DM/NMEA/AT/modem ports with interface 4 reserved.
+
+Signed-off-by: instipod <instipod@instipod.com>
+---
+diff -ru a/drivers/net/usb/qmi_wwan.c b/drivers/net/usb/qmi_wwan.c
+--- a/drivers/net/usb/qmi_wwan.c	2026-11-01 18:50:46.775933489 +0000
++++ b/drivers/net/usb/qmi_wwan.c	2026-11-01 18:50:46.785933988 +0000
+@@ -584,6 +584,7 @@
+ 	{QMI_FIXED_INTF(0x1bbb, 0x011e, 4)},	/* Telekom Speedstick LTE II (Alcatel One Touch L100V LTE) */
+ 	{QMI_FIXED_INTF(0x2357, 0x0201, 4)},	/* TP-LINK HSUPA Modem MA180 */
+ 	{QMI_FIXED_INTF(0x1bc7, 0x1200, 5)},	/* Telit LE920 */
++	{QMI_FIXED_INTF(0x2c7c, 0x0512, 4)},	/* Quectel EG12/EM12 */
+ 	{QMI_FIXED_INTF(0x1e2d, 0x12d1, 4)},	/* Cinterion PLxx */
+ 
+ 	/* 4. Gobi 1000 devices */
+diff -ru a/drivers/usb/serial/option.c b/drivers/usb/serial/option.c
+--- a/drivers/usb/serial/option.c	2026-11-01 18:50:46.785933988 +0000
++++ b/drivers/usb/serial/option.c	2026-11-01 18:50:46.785933988 +0000
+@@ -1351,6 +1351,8 @@
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d03, 0xff, 0x00, 0x00) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e01, 0xff, 0xff, 0xff) }, /* D-Link DWM-152/C1 */
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e02, 0xff, 0xff, 0xff) }, /* D-Link DWM-156/C1 */
++	{ USB_DEVICE(0x2c7c, 0x0512),	/* Quectel EG12/EM12 */
++	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+ 	{ } /* Terminating entry */
+ };
+ MODULE_DEVICE_TABLE(usb, option_ids);
