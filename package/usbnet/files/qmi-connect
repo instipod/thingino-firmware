@@ -12,8 +12,14 @@ cfg() {
 	jct "$CONFIG_JSON" get "modem.$1" 2>/dev/null | tr -d '"\r\n'
 }
 
+# cdc-wdm gives each reply to whichever reader gets it first; the lock is
+# shared with json-wwan.cgi so concurrent queries cannot steal replies.
 qmi() {
-	uqmi -s -t 5000 -d "$dev" "$@" 9>&-
+	[ -d "$RUN_DIR" ] || mkdir -p "$RUN_DIR"
+	{
+		flock 8
+		uqmi -s -t 5000 -d "$dev" "$@"
+	} 8>"$RUN_DIR/$name.qmi" 9>&-
 }
 
 nap() {

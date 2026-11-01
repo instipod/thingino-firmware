@@ -169,6 +169,20 @@ define USBNET_INSTALL_MIFI_STATUS
 		$(TARGET_DIR)/var/www/a/plugins/mifi.webui.json
 endef
 USBNET_POST_INSTALL_TARGET_HOOKS += USBNET_INSTALL_MIFI_STATUS
+
+ifeq ($(BR2_PACKAGE_USBNET_QMI_WWAN),y)
+define USBNET_INSTALL_WWAN_WWW
+	$(INSTALL) -D -m 0755 $(USBNET_PKGDIR)/files/www/x/json-wwan.cgi \
+		$(TARGET_DIR)/var/www/x/json-wwan.cgi
+	$(INSTALL) -D -m 0644 $(USBNET_PKGDIR)/files/www/info-wwan.html \
+		$(TARGET_DIR)/var/www/info-wwan.html
+	$(INSTALL) -D -m 0644 $(USBNET_PKGDIR)/files/www/a/info-wwan.js \
+		$(TARGET_DIR)/var/www/a/info-wwan.js
+	$(INSTALL) -D -m 0644 $(USBNET_PKGDIR)/files/wwan.webui.json \
+		$(TARGET_DIR)/var/www/a/plugins/wwan.webui.json
+endef
+USBNET_POST_INSTALL_TARGET_HOOKS += USBNET_INSTALL_WWAN_WWW
+endif
 endif
 
 define USBNET_INSTALL_MODULE_LIST
