@@ -22,6 +22,7 @@ BROADCAST="broadcast +"
 DEFAULT_METRIC=100
 WIRELESS_METRIC=200
 WIRED_METRIC=100
+WWAN_METRIC=300
 
 # Function to determine the interface type
 get_interface_type() {
@@ -31,6 +32,9 @@ get_interface_type() {
 			;;
 		eth* | enp* | ens* | usb* | enx*)
 			echo "wired"
+			;;
+		wwan*)
+			echo "wwan"
 			;;
 		*)
 			echo "unknown"
@@ -66,6 +70,9 @@ case "$1" in
 						;;
 					wired)
 						route add default gw $i dev $interface metric $WIRED_METRIC
+						;;
+					wwan)
+						route add default gw $i dev $interface metric $WWAN_METRIC
 						;;
 					*)
 						route add default gw $i dev $interface metric $DEFAULT_METRIC

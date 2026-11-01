@@ -1,0 +1,251 @@
+#!/bin/sh
+# shellcheck disable=SC3043
+
+RUN_DIR="/run/qmi"
+CONFIG_JSON="/etc/thingino.json"
+
+log_msg() {
+	logger -t qmi-connect "$name: $*"
+}
+
+cfg() {
+	jct "$CONFIG_JSON" get "modem.$1" 2>/dev/null | tr -d '"\r\n'
+}
+
+qmi() {
+	uqmi -s -t 5000 -d "$dev" "$@" 9>&-
+}
+
+nap() {
+	sleep "$1" 9>&- &
+	nap_pid=$!
+	wait "$nap_pid"
+	nap_pid=""
+}
+
+find_iface() {
+	local intf n
+	intf=$(readlink -f "/sys/class/usbmisc/$name/device") || return 1
+	for n in /sys/class/net/*; do
+		if [ "$(readlink -f "$n/device")" = "$intf" ]; then
+			basename "$n"
+			return 0
+		fi
+	done
+	return 1
+}
+
+wait_for() {
+	local tries="$1" pattern="$2"
+	shift 2
+	while [ "$tries" -gt 0 ]; do
+		[ -c "$dev" ] || return 1
+		qmi "$@" 2>/dev/null | grep -q "$pattern" && return 0
+		tries=$((tries - 1))
+		nap 2
+	done
+	return 1
+}
+
+start_dhcp() {
+	local pid
+	pid=$(cat "$RUN_DIR/$name.udhcpc" 2>/dev/null)
+	[ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && return 0
+	udhcpc -i "$iface" -p "$RUN_DIR/$name.udhcpc" -x "hostname:$(hostname)" \
+		-R -b -S -t 5 -T 3 -O search >/dev/null 2>&1 9>&-
+}
+
+stop_dhcp() {
+	local pid
+	pid=$(cat "$RUN_DIR/$name.udhcpc" 2>/dev/null)
+	[ -n "$pid" ] && kill "$pid" 2>/dev/null
+	rm -f "$RUN_DIR/$name.udhcpc"
+}
+
+release_session() {
+	local cid pdh
+	cid=$(cat "$RUN_DIR/$name.cid" 2>/dev/null)
+	pdh=$(cat "$RUN_DIR/$name.pdh" 2>/dev/null)
+	if [ -n "$cid" ] && [ -c "$dev" ]; then
+		[ -n "$pdh" ] && qmi --set-client-id "wds,$cid" --stop-network "$pdh" >/dev/null 2>&1
+		qmi --set-client-id "wds,$cid" --release-client-id wds >/dev/null 2>&1
+	fi
+	rm -f "$RUN_DIR/$name.cid" "$RUN_DIR/$name.pdh"
+}
+
+session_up() {
+	local cid
+	cid=$(cat "$RUN_DIR/$name.cid" 2>/dev/null)
+	[ -n "$cid" ] && [ -s "$RUN_DIR/$name.pdh" ] || return 1
+	qmi --set-client-id "wds,$cid" --get-data-status 2>/dev/null | grep -q '"connected"'
+}
+
+connect() {
+	local apn auth user pass pin cid pdh
+
+	iface=$(find_iface) || return 1
+	wait_for 30 '"service_' --get-versions || return 1
+
+	pin=$(cfg pin)
+	if [ -n "$pin" ] && qmi --get-pin-status 2>/dev/null | grep -q '"pin1_status":"not_verified"'; then
+		if ! qmi --verify-pin1 "$pin" >/dev/null 2>&1; then
+			log_msg "SIM PIN rejected, not retrying"
+			return 2
+		fi
+	fi
+
+	qmi --set-device-operating-mode online >/dev/null 2>&1
+	qmi --wda-set-data-format 802.3 >/dev/null 2>&1
+	qmi --set-data-format 802.3 >/dev/null 2>&1
+
+	if ! wait_for 60 '"registration":"registered"' --get-serving-system; then
+		log_msg "not registered on a network"
+		return 1
+	fi
+
+	release_session
+	cid=$(qmi --get-client-id wds 2>/dev/null)
+	case "$cid" in '' | *[!0-9]*) return 1 ;; esac
+	echo "$cid" >"$RUN_DIR/$name.cid"
+
+	apn=$(cfg apn)
+	auth=$(cfg auth)
+	user=$(cfg username)
+	pass=$(cfg password)
+	set -- --start-network --ip-family ipv4
+	[ -n "$apn" ] && set -- "$@" --apn "$apn"
+	[ -n "$auth" ] && set -- "$@" --auth-type "$auth"
+	[ -n "$user" ] && set -- "$@" --username "$user"
+	[ -n "$pass" ] && set -- "$@" --password "$pass"
+
+	pdh=$(qmi --set-client-id "wds,$cid" "$@" 2>/dev/null)
+	case "$pdh" in
+		'' | *[!0-9]*)
+			log_msg "start-network failed: ${pdh:-no answer}"
+			release_session
+			return 1
+			;;
+	esac
+	echo "$pdh" >"$RUN_DIR/$name.pdh"
+
+	ip link set "$iface" up
+	log_msg "connected via $iface${apn:+ (APN $apn)}"
+	stop_dhcp
+	start_dhcp
+	return 0
+}
+
+teardown() {
+	[ -n "$nap_pid" ] && kill "$nap_pid" 2>/dev/null
+	stop_dhcp
+	release_session
+	[ -n "$iface" ] && ip link set "$iface" down 2>/dev/null
+	rm -f "$RUN_DIR/$name.pid"
+	log_msg "stopped"
+}
+
+run() {
+	local rc
+	mkdir -p "$RUN_DIR"
+	exec 9>"$RUN_DIR/$name.lock"
+	flock -n 9 || exit 0
+	echo $$ >"$RUN_DIR/$name.pid"
+	trap 'teardown; exit 0' TERM INT
+	log_msg "modem found"
+
+	while [ -c "$dev" ]; do
+		if session_up; then
+			start_dhcp
+			nap 30
+			continue
+		fi
+		stop_dhcp
+		connect
+		rc=$?
+		[ "$rc" -eq 2 ] && break
+		[ "$rc" -ne 0 ] && nap 15
+	done
+	teardown
+}
+
+enabled() {
+	[ "$(cfg enabled)" != "false" ]
+}
+
+start_one() {
+	enabled || return 0
+	setsid "$0" run "$1" </dev/null >/dev/null 2>&1 &
+}
+
+stop_one() {
+	local pid tries=10
+	pid=$(cat "$RUN_DIR/$1.pid" 2>/dev/null)
+	[ -n "$pid" ] || return 0
+	kill "$pid" 2>/dev/null
+	while [ "$tries" -gt 0 ] && kill -0 "$pid" 2>/dev/null; do
+		tries=$((tries - 1))
+		sleep 1
+	done
+}
+
+stop_all() {
+	local f
+	for f in "$RUN_DIR"/*.pid; do
+		[ -f "$f" ] || continue
+		f=${f##*/}
+		stop_one "${f%.pid}"
+	done
+}
+
+status() {
+	local f n
+	for f in /dev/cdc-wdm*; do
+		[ -c "$f" ] || continue
+		n=${f#/dev/}
+		name=$n
+		dev=$f
+		if [ -s "$RUN_DIR/$n.pid" ]; then
+			echo "$n: $(find_iface) $(qmi --get-serving-system 2>/dev/null)"
+			echo "$n: data $(qmi --set-client-id "wds,$(cat "$RUN_DIR/$n.cid" 2>/dev/null)" --get-data-status 2>/dev/null)"
+		else
+			echo "$n: not managed"
+		fi
+	done
+}
+
+name="$2"
+dev="/dev/$name"
+nap_pid=""
+
+case "$1" in
+	run)
+		[ -n "$name" ] || exit 1
+		run
+		;;
+	start)
+		[ -n "$name" ] || exit 1
+		start_one "$name"
+		;;
+	stop)
+		if [ -n "$name" ]; then
+			stop_one "$name"
+		else
+			stop_all
+		fi
+		;;
+	hotplug)
+		case "$ACTION" in
+			remove) stop_one "$MDEV" ;;
+			*) [ -c "/dev/$MDEV" ] && start_one "$MDEV" ;;
+		esac
+		;;
+	status)
+		status
+		;;
+	*)
+		echo "Usage: $0 {start|stop|status} [cdc-wdmN]"
+		exit 1
+		;;
+esac
+
+exit 0

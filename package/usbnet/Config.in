@@ -91,11 +91,18 @@ config BR2_PACKAGE_USBNET_RNDIS
 config BR2_PACKAGE_USBNET_QMI_WWAN
 	bool "QMI WWAN"
 	depends on BR2_PACKAGE_USBNET
+	depends on !BR2_STATIC_LIBS # uqmi
+	depends on BR2_TOOLCHAIN_HAS_SYNC_4 # uqmi
+	select BR2_PACKAGE_UQMI
 	help
 	  Select this option to enable the QMI WWAN driver for Qualcomm
-	  based LTE/3G modems. It only drives the network interface; the
-	  data session must be started over the modem's QMI control
-	  device (/dev/cdc-wdm0) with a tool such as uqmi or qmicli.
+	  based LTE/3G modems, together with uqmi and qmi-connect, which
+	  starts the data session and DHCP on the modem's wwan interface
+	  at boot and whenever a modem is plugged in.
+
+	  Settings are read from the "modem" object in
+	  /etc/thingino.json: apn, auth (none|pap|chap|both), username,
+	  password, pin, and enabled (set to false to leave modems alone).
 
 config BR2_PACKAGE_USBNET_WWAN_SERIAL
 	bool "WWAN via USB SERIAL"

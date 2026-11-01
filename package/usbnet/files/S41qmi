@@ -1,0 +1,42 @@
+#!/bin/sh
+
+# shellcheck source=/dev/null
+. /etc/init.d/lib-log
+
+start() {
+	log -c 15 "Starting QMI modems"
+
+	found=0
+	for dev in /dev/cdc-wdm*; do
+		[ -c "$dev" ] || continue
+		found=1
+		log -c 240 -e "- ${dev#/dev/}"
+		qmi-connect start "${dev#/dev/}"
+	done
+	[ "$found" -eq 1 ] || log -c 240 -e "- no modem present"
+}
+
+stop() {
+	log -c 15 "Stopping QMI modems"
+	qmi-connect stop
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart)
+		stop
+		sleep 1
+		start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
+
+exit 0

@@ -146,6 +146,16 @@ USBNET_MODULES = \
 	$(if $(BR2_PACKAGE_USBNET_QMI_WWAN),qmi_wwan) \
 	$(if $(BR2_PACKAGE_USBNET_RNDIS),rndis_host)
 
+ifeq ($(BR2_PACKAGE_USBNET_QMI_WWAN),y)
+define USBNET_INSTALL_QMI_CONNECT
+	$(INSTALL) -D -m 0755 $(USBNET_PKGDIR)/files/qmi-connect \
+		$(TARGET_DIR)/usr/sbin/qmi-connect
+	$(INSTALL) -D -m 0755 $(USBNET_PKGDIR)/files/S41qmi \
+		$(TARGET_DIR)/etc/init.d/S41qmi
+endef
+USBNET_POST_INSTALL_TARGET_HOOKS += USBNET_INSTALL_QMI_CONNECT
+endif
+
 define USBNET_INSTALL_MODULE_LIST
 	$(if $(strip $(USBNET_MODULES)), \
 		mkdir -p $(TARGET_DIR)/etc/modules.d; \
