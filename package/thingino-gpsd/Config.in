@@ -1,0 +1,15 @@
+config BR2_PACKAGE_THINGINO_GPSD
+	bool "thingino gpsd service"
+	depends on BR2_USE_MMU
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on !BR2_STATIC_LIBS
+	select BR2_PACKAGE_GPSD
+	select BR2_PACKAGE_GPSD_DAEMON
+	select BR2_PACKAGE_GPSD_CLIENTS
+	help
+	  Installs gpsd with its client tools (gpspipe, gpsctl, ...) and
+	  an init script that starts gpsd on boot.
+
+	  The GPS source is taken from BR2_PACKAGE_GPSD_DEVICES and may be
+	  a serial device or a network source such as
+	  tcp://192.168.1.1:11010 or udp://0.0.0.0:11010.
