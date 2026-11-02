@@ -1,0 +1,153 @@
+#!/bin/sh
+
+# shellcheck source=/dev/null
+. /etc/init.d/lib-log
+
+CONFIG_FILE="/etc/thingino.json"
+CHAIN="THINGINO_FW"
+PORTAL_MODE_FLAG="/run/portal_mode"
+
+MODULES4="x_tables xt_tcpudp nf_defrag_ipv4 nf_conntrack nf_conntrack_ipv4 xt_state ip_tables iptable_filter"
+MODULES6="nf_defrag_ipv6 nf_conntrack_ipv6 ip6_tables ip6table_filter"
+
+cfg() {
+	local value
+	value=$(jct "$CONFIG_FILE" get "firewall.$1" 2>/dev/null)
+	[ "$value" = "null" ] && value=""
+	printf '%s' "$value" | sed -e 's/^"//' -e 's/"$//'
+}
+
+have() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+load_modules() {
+	for m in $1; do
+		modprobe "$m" >/dev/null 2>&1
+	done
+}
+
+unhook() {
+	local ipt="$1"
+	have "$ipt" || return 0
+	while $ipt -D INPUT -j "$CHAIN" 2>/dev/null; do :; done
+	$ipt -F "$CHAIN" 2>/dev/null
+	$ipt -X "$CHAIN" 2>/dev/null
+	return 0
+}
+
+build() {
+	local ipt="$1" family="$2" addr
+
+	$ipt -N "$CHAIN" || return 1
+	$ipt -A "$CHAIN" -i lo -j ACCEPT
+	$ipt -A "$CHAIN" -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+	if [ "$family" = 4 ]; then
+		$ipt -A "$CHAIN" -p udp --sport 67 --dport 68 -j ACCEPT
+		[ "$allow_ping" = "true" ] &&
+			$ipt -A "$CHAIN" -p icmp --icmp-type echo-request -j ACCEPT
+	else
+		[ "$allow_ping" = "true" ] ||
+			$ipt -A "$CHAIN" -p ipv6-icmp --icmpv6-type echo-request -j DROP
+		$ipt -A "$CHAIN" -p ipv6-icmp -j ACCEPT
+		$ipt -A "$CHAIN" -p udp --sport 547 --dport 546 -j ACCEPT
+	fi
+
+	for addr in $trusted; do
+		case "$addr" in
+			*:*) [ "$family" = 6 ] || continue ;;
+			*) [ "$family" = 4 ] || continue ;;
+		esac
+		$ipt -A "$CHAIN" -s "$addr" -j ACCEPT ||
+			log -c 15 "firewall: skipping invalid address $addr"
+	done
+
+	$ipt -A "$CHAIN" -j DROP
+	$ipt -I INPUT 1 -j "$CHAIN"
+}
+
+start() {
+	enabled=$(cfg enabled)
+	allow_ping=$(cfg allow_ping)
+	trusted=$(cfg trusted | tr ',' ' ')
+
+	if [ "$enabled" != "true" ]; then
+		stop_rules
+		return 0
+	fi
+
+	if [ -f "$PORTAL_MODE_FLAG" ]; then
+		log -c 15 "Firewall not applied in portal mode"
+		stop_rules
+		return 0
+	fi
+
+	if [ -z "$trusted" ]; then
+		log -c 15 "Firewall enabled but no trusted addresses, not applied"
+		stop_rules
+		return 1
+	fi
+
+	log -c 15 "Starting firewall"
+
+	if ! have iptables; then
+		log -c 15 "Firewall: iptables not found"
+		return 1
+	fi
+
+	load_modules "$MODULES4"
+	unhook iptables
+	if ! build iptables 4; then
+		unhook iptables
+		return 1
+	fi
+
+	if have ip6tables && [ -d /proc/sys/net/ipv6 ]; then
+		load_modules "$MODULES6"
+		unhook ip6tables
+		build ip6tables 6 || unhook ip6tables
+	fi
+
+	return 0
+}
+
+stop_rules() {
+	unhook iptables
+	unhook ip6tables
+}
+
+stop() {
+	log -c 15 "Stopping firewall"
+	stop_rules
+}
+
+status() {
+	if have iptables && iptables -S INPUT 2>/dev/null | grep -q -- "-j $CHAIN"; then
+		echo "active"
+		return 0
+	fi
+	echo "inactive"
+	return 1
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart | reload)
+		start
+		;;
+	status)
+		status
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|status}"
+		exit 1
+		;;
+esac
+
+exit $?

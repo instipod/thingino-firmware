@@ -1,0 +1,17 @@
+config BR2_PACKAGE_THINGINO_FIREWALL
+	bool "thingino-firewall"
+	depends on BR2_PACKAGE_THINGINO_KOPT
+	select BR2_PACKAGE_THINGINO_KOPT_NETFILTER
+	select BR2_PACKAGE_IPTABLES
+	help
+	  Inbound IPv4/IPv6 packet filter built on iptables, with a
+	  Web UI page under Settings > Firewall.
+
+	  When enabled, new inbound connections are accepted only from
+	  the trusted addresses/subnets. Loopback, replies to outbound
+	  connections and DHCP replies are always allowed. The filter is
+	  not applied while the camera is in captive-portal mode.
+
+	  Settings are read from the "firewall" object in
+	  /etc/thingino.json: enabled (bool), allow_ping (bool) and
+	  trusted (space-separated list of IPs or CIDR subnets).

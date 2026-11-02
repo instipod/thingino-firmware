@@ -1,0 +1,32 @@
+{
+  "name": "firewall",
+  "label": "Firewall",
+  "apiVersion": 1,
+  "nav": [
+    {
+      "section": "ddSettings",
+      "position": "after:Network",
+      "items": [
+        {
+          "label": "Firewall",
+          "href": "/config-firewall.html"
+        }
+      ]
+    }
+  ],
+  "scripts": [],
+  "styles": [],
+  "preview": {
+    "scripts": [],
+    "html": null
+  },
+  "featureFlags": {
+    "firewall": true
+  },
+  "cgi": [
+    "/x/json-config-firewall.cgi"
+  ],
+  "pages": [
+    "/config-firewall.html"
+  ]
+}
