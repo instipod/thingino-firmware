@@ -70,7 +70,7 @@ find_iface() {
 
 modem_json() {
 	local name="$1" dev="/dev/$1" intf usb iface pid cid managed=false
-	local versions mode caps imei pin iccid imsi msisdn serving sysinfo signal
+	local versions mode caps imei pin iccid imsi msisdn serving opname sysinfo signal
 	local data settings addr state rx tx wds
 
 	intf=$(readlink -f "/sys/class/usbmisc/$name/device")
@@ -94,6 +94,7 @@ modem_json() {
 		imsi=$(sim_id --uim-get-imsi || sim_id --get-imsi)
 		msisdn=$(qmi --get-msisdn)
 		serving=$(qmi --get-serving-system)
+		opname=$(qmi --get-operator-name)
 		sysinfo=$(qmi --get-system-info)
 		signal=$(qmi --get-signal-info)
 		if [ -n "$wds" ]; then
@@ -126,6 +127,7 @@ modem_json() {
 		"$(json_val "$versions")" "$(json_val "$mode")" "$(json_val "$caps")" "$(json_val "$imei")"
 	printf '"sim":{"pin":%s,"iccid":%s,"imsi":%s,"msisdn":%s},' \
 		"$(json_val "$pin")" "$(json_val "$iccid")" "$(json_val "$imsi")" "$(json_val "$msisdn")"
+	printf '"operator_name":%s,' "$(json_val "$opname")"
 	printf '"serving_system":%s,"system_info":%s,"signal":%s,"data_status":%s,"settings":%s}' \
 		"$(json_val "$serving")" "$(json_val "$sysinfo")" "$(json_val "$signal")" \
 		"$(json_val "$data")" "$(json_val "$settings")"

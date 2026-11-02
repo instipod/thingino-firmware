@@ -1,5 +1,5 @@
 From: instipod <instipod@instipod.com>
-Subject: [PATCH] decode UCS-2 PLMN name, read ICCID/IMSI via UIM
+Subject: [PATCH] decode UCS-2 PLMN name, add operator name and UIM ICCID/IMSI
 
 The current PLMN description in NAS Get Serving System carries no
 encoding indicator. Sierra Wireless modems send it as UCS-2, which the
@@ -7,20 +7,25 @@ generated parser copies as a C string, so only the first character
 survives. Re-read the raw TLV and convert UCS-2 to UTF-8 when the
 name contains NUL bytes.
 
+Add --get-operator-name (NAS Get Operator Name) to report the SIM
+service provider name, the NITZ long/short network names and the SIM
+operator PLMN names, decoded from GSM 7-bit or UCS-2.
+
 Newer modems no longer answer the legacy DMS UIM ICCID/IMSI requests.
 Add --uim-get-iccid and --uim-get-imsi, which read EF ICCID (3F00/2FE2)
 and EF IMSI (ADF/6F07) with UIM Read Transparent.
 
 Signed-off-by: instipod <instipod@instipod.com>
 ---
- uqmi/commands-nas.c |  75 +++++++++++++++++++++++++++++++-
- uqmi/commands-uim.c | 111 ++++++++++++++++++++++++++++++++++++++++++++++
- uqmi/commands-uim.h |   5 ++
- 3 files changed, 190 insertions(+), 1 deletion(-)
+  uqmi/commands-nas.c | 209 ++++++++++++++++++++++++++++++++-
+  uqmi/commands-nas.h |   2 +
+  uqmi/commands-uim.c | 111 +++++++++++++++++
+  uqmi/commands-uim.h |   5 +
+ 4 files changed, 326 insertions(+), 1 deletion(-)
 
 --- a/uqmi/commands-nas.c
 +++ b/uqmi/commands-nas.c
-@@ -1043,6 +1043,78 @@ cmd_nas_get_signal_info_prepare(struct qmi_dev *qmi, struct qmi_request *req, st
+@@ -1043,6 +1043,212 @@ cmd_nas_get_signal_info_prepare(struct qmi_dev *qmi, struct qmi_request *req, st
  	return QMI_CMD_REQUEST;
  }
  
@@ -42,6 +47,87 @@ Signed-off-by: instipod <instipod@instipod.com>
 +	return 3;
 +}
 +
++#define NAS_NAME_MAX (3 * 256 + 1)
++
++/* UCS-2 to UTF-8; byte order is guessed from where the NUL bytes sit. */
++static void
++nas_ucs2_to_utf8(const uint8_t *d, unsigned int n, char *out)
++{
++	unsigned int i, ofs = 0, even = 0, odd = 0;
++
++	for (i = 0; i < n; i++) {
++		if (d[i])
++			continue;
++		if (i & 1)
++			odd++;
++		else
++			even++;
++	}
++
++	for (i = 0; i + 1 < n && ofs + 3 < NAS_NAME_MAX; i += 2) {
++		unsigned int cp = even > odd ? (d[i] << 8) | d[i + 1] : d[i] | (d[i + 1] << 8);
++
++		if (!cp)
++			break;
++		if (cp >= 0xd800 && cp <= 0xdfff)
++			cp = '?';
++		ofs += utf8_put(out + ofs, cp);
++	}
++	out[ofs] = 0;
++}
++
++/* Packed GSM 7-bit default alphabet; non-ASCII characters become '?'. */
++static void
++nas_gsm7_to_utf8(const uint8_t *d, unsigned int n, unsigned int spare, char *out)
++{
++	unsigned int i, septets, ofs = 0;
++
++	if (spare > 7)
++		spare = 0;
++	septets = (n * 8 - (n ? spare : 0)) / 7;
++
++	for (i = 0; i < septets && ofs + 1 < NAS_NAME_MAX; i++) {
++		unsigned int bit = i * 7, byte = bit / 8, shift = bit % 8;
++		unsigned int c = d[byte] >> shift;
++
++		if (shift > 1 && byte + 1 < n)
++			c |= d[byte + 1] << (8 - shift);
++		c &= 0x7f;
++
++		if (c == 0x00)
++			c = '@';
++		else if (c == 0x02)
++			c = '$';
++		else if (c == 0x11)
++			c = '_';
++		else if (c == 0x1b)
++			continue;
++		else if (c < 0x20 || c == 0x24 || c == 0x40 ||
++			 (c >= 0x5b && c <= 0x60) || c >= 0x7b)
++			c = '?';
++		out[ofs++] = c;
++	}
++	while (ofs && out[ofs - 1] == '\r')
++		ofs--;
++	out[ofs] = 0;
++}
++
++static void
++nas_add_plmn_name(const char *key, uint8_t encoding, unsigned int spare,
++		  const uint8_t *d, unsigned int n)
++{
++	static char out[NAS_NAME_MAX];
++
++	if (!n)
++		return;
++	if (encoding == 1)
++		nas_ucs2_to_utf8(d, n, out);
++	else
++		nas_gsm7_to_utf8(d, n, spare, out);
++	if (out[0])
++		blobmsg_add_string(&status, key, out);
++}
++
 +/*
 + * The current PLMN description carries no encoding indicator and some
 + * modems (e.g. Sierra Wireless) send it as UCS-2, which the generated
@@ -51,14 +137,14 @@ Signed-off-by: instipod <instipod@instipod.com>
 +static const char *
 +nas_plmn_description(struct qmi_msg *msg, const char *fallback)
 +{
-+	static char out[3 * 128 + 1];
++	static char out[NAS_NAME_MAX];
 +	unsigned int buflen = le16_to_cpu(msg->svc.tlv_len);
 +	void *buf = msg->svc.tlv;
 +	struct tlv *tlv;
 +
 +	while ((tlv = tlv_get_next(&buf, &buflen)) != NULL) {
 +		unsigned int len = tlv_data_len(tlv);
-+		unsigned int i, n, ofs = 0, even = 0, odd = 0;
++		unsigned int n;
 +		uint8_t *d = tlv->data;
 +
 +		if (tlv->type != 0x12 || len < 5)
@@ -69,37 +155,90 @@ Signed-off-by: instipod <instipod@instipod.com>
 +		if (n > len - 5)
 +			n = len - 5;
 +
-+		for (i = 0; i < n; i++) {
-+			if (d[i])
-+				continue;
-+			if (i & 1)
-+				odd++;
-+			else
-+				even++;
-+		}
-+		if ((!even && !odd) || n < 2)
++		if (n < 2 || !memchr(d, 0, n))
 +			return fallback;
 +
-+		for (i = 0; i + 1 < n; i += 2) {
-+			unsigned int cp = even > odd ? (d[i] << 8) | d[i + 1] : d[i] | (d[i + 1] << 8);
-+
-+			if (!cp)
-+				break;
-+			if (cp >= 0xd800 && cp <= 0xdfff)
-+				cp = '?';
-+			ofs += utf8_put(out + ofs, cp);
-+		}
-+		out[ofs] = 0;
++		nas_ucs2_to_utf8(d, n, out);
 +		return out;
 +	}
 +
 +	return fallback;
 +}
 +
++static void
++cmd_nas_get_operator_name_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
++{
++	struct qmi_nas_get_operator_name_response res;
++	char spn[NAS_NAME_MAX];
++	unsigned int i, n = 0;
++	void *c, *a;
++
++	qmi_parse_nas_get_operator_name_response(msg, &res);
++
++	c = blobmsg_open_table(&status, NULL);
++
++	if (res.set.service_provider_name && res.data.service_provider_name.name) {
++		const char *s = res.data.service_provider_name.name;
++
++		for (i = 0; s[i] && n + 1 < sizeof(spn); i++) {
++			if ((uint8_t)s[i] >= 0x20 && (uint8_t)s[i] < 0x7f)
++				spn[n++] = s[i];
++		}
++		spn[n] = 0;
++		if (n)
++			blobmsg_add_string(&status, "service_provider_name", spn);
++	}
++
++	if (res.set.nitz_information) {
++		nas_add_plmn_name("nitz_long_name",
++				  res.data.nitz_information.name_encoding,
++				  res.data.nitz_information.long_name_spare_bits,
++				  res.data.nitz_information.long_name,
++				  res.data.nitz_information.long_name_n);
++		nas_add_plmn_name("nitz_short_name",
++				  res.data.nitz_information.name_encoding,
++				  res.data.nitz_information.short_name_spare_bits,
++				  res.data.nitz_information.short_name,
++				  res.data.nitz_information.short_name_n);
++	}
++
++	if (res.data.operator_string_name && res.data.operator_string_name[0])
++		blobmsg_add_string(&status, "operator_string_name", res.data.operator_string_name);
++
++	if (res.data.operator_plmn_name_n) {
++		a = blobmsg_open_array(&status, "operator_plmn_names");
++		for (i = 0; i < res.data.operator_plmn_name_n; i++) {
++			void *t = blobmsg_open_table(&status, NULL);
++
++			nas_add_plmn_name("long_name",
++					  res.data.operator_plmn_name[i].name_encoding,
++					  res.data.operator_plmn_name[i].long_name_spare_bits,
++					  res.data.operator_plmn_name[i].long_name,
++					  res.data.operator_plmn_name[i].long_name_n);
++			nas_add_plmn_name("short_name",
++					  res.data.operator_plmn_name[i].name_encoding,
++					  res.data.operator_plmn_name[i].short_name_spare_bits,
++					  res.data.operator_plmn_name[i].short_name,
++					  res.data.operator_plmn_name[i].short_name_n);
++			blobmsg_close_table(&status, t);
++		}
++		blobmsg_close_array(&status, a);
++	}
++
++	blobmsg_close_table(&status, c);
++}
++
++static enum qmi_cmd_result
++cmd_nas_get_operator_name_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	qmi_set_nas_get_operator_name_request(msg);
++	return QMI_CMD_REQUEST;
++}
++
  static void
  cmd_nas_get_serving_system_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
  {
-@@ -1079,7 +1151,8 @@ cmd_nas_get_serving_system_cb(struct qmi_dev *qmi, struct qmi_request *req, stru
+@@ -1079,7 +1285,8 @@ cmd_nas_get_serving_system_cb(struct qmi_dev *qmi, struct qmi_request *req, stru
  		blobmsg_add_u32(&status, "plmn_mcc", res.data.current_plmn.mcc);
  		blobmsg_add_u32(&status, "plmn_mnc", res.data.current_plmn.mnc);
  		if (res.data.current_plmn.description)
@@ -109,6 +248,24 @@ Signed-off-by: instipod <instipod@instipod.com>
  	}
  
  	if (res.set.roaming_indicator)
+--- a/uqmi/commands-nas.h
++++ b/uqmi/commands-nas.h
+@@ -30,6 +30,7 @@
+ 	__uqmi_command(nas_network_scan, network-scan, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_get_signal_info, get-signal-info, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_get_serving_system, get-serving-system, no, QMI_SERVICE_NAS), \
++	__uqmi_command(nas_get_operator_name, get-operator-name, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_set_network_preference, set-network-preference, required, CMD_TYPE_OPTION), \
+ 	__uqmi_command(nas_set_roaming, set-network-roaming, required, CMD_TYPE_OPTION), \
+ 	__uqmi_command(nas_get_system_info, get-system-info, no, QMI_SERVICE_NAS), \
+@@ -52,6 +53,7 @@
+ 		"  --get-plmn:                       Get preferred network selection info\n" \
+ 		"  --get-signal-info:                Get signal strength info\n" \
+ 		"  --get-serving-system:             Get serving system info\n" \
++		"  --get-operator-name:              Get operator name (SPN, NITZ, SIM operator names)\n" \
+ 		"  --get-system-info:                Get system info\n" \
+ 		"  --get-lte-cphy-ca-info:           Get LTE Cphy CA Info\n" \
+ 		"  --get-cell-location-info:         Get Cell Location Info\n" \
 --- a/uqmi/commands-uim.c
 +++ b/uqmi/commands-uim.c
 @@ -321,3 +321,114 @@ cmd_uim_send_apdu_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct q

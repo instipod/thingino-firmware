@@ -118,6 +118,19 @@
     const sim = obj(m.sim);
     const pin = obj(sim.pin);
     const serving = obj(m.serving_system);
+    const opname = obj(m.operator_name);
+    const simNames = Array.isArray(opname.operator_plmn_names)
+      ? opname.operator_plmn_names
+      : [];
+    const networkName =
+      opname.nitz_long_name ||
+      opname.nitz_short_name ||
+      serving.plmn_description;
+    const simProvider =
+      opname.service_provider_name ||
+      opname.operator_string_name ||
+      obj(simNames[0]).long_name ||
+      obj(simNames[0]).short_name;
     const caps = obj(m.capabilities);
     const settings = obj(m.settings);
     const ipv4 = obj(settings.ipv4);
@@ -177,7 +190,8 @@
         "Network",
         [
           ["Registration", serving.registration],
-          ["Operator", serving.plmn_description],
+          ["Network name", networkName],
+          ["SIM provider", simProvider],
           ["MCC-MNC", mccMnc],
           ["Roaming", serving.roaming],
           ["Service", rat ? rat.toUpperCase() : "-"],
@@ -216,6 +230,7 @@
       {
         capabilities: m.capabilities,
         versions: m.versions,
+        operator_name: m.operator_name,
         serving_system: m.serving_system,
         system_info: m.system_info,
         signal: m.signal,
