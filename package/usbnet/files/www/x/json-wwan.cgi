@@ -39,6 +39,24 @@ sysfs() {
 	cat "$1" 2>/dev/null | tr -d '\r\n'
 }
 
+sim_id() {
+	local v
+	v=$(qmi "$1" | tr -d '"\r\n')
+	case "$v" in
+		'' | *[!0-9]*) return 1 ;;
+	esac
+	printf '"%s"' "$v"
+}
+
+lock_qmi() {
+	local tries=15
+	until flock -n 8; do
+		tries=$((tries - 1))
+		[ "$tries" -gt 0 ] || return 1
+		sleep 1
+	done
+}
+
 find_iface() {
 	local n
 	for n in /sys/class/net/*; do
@@ -66,14 +84,14 @@ modem_json() {
 
 	mkdir -p "$RUN_DIR"
 	exec 8>"$RUN_DIR/$name.qmi"
-	if flock -w 15 8; then
+	if lock_qmi; then
 		versions=$(qmi --get-versions)
 		mode=$(qmi --get-device-operating-mode)
 		caps=$(qmi --get-capabilities)
 		imei=$(qmi --get-imei)
 		pin=$(qmi --get-pin-status)
-		iccid=$(qmi --get-iccid)
-		imsi=$(qmi --get-imsi)
+		iccid=$(sim_id --uim-get-iccid || sim_id --get-iccid)
+		imsi=$(sim_id --uim-get-imsi || sim_id --get-imsi)
 		msisdn=$(qmi --get-msisdn)
 		serving=$(qmi --get-serving-system)
 		sysinfo=$(qmi --get-system-info)
@@ -89,6 +107,7 @@ modem_json() {
 	if [ -n "$iface" ]; then
 		addr=$(ip -4 -o addr show dev "$iface" 2>/dev/null | awk '{print $4; exit}')
 		state=$(sysfs "/sys/class/net/$iface/operstate")
+		[ "$state" = "unknown" ] && [ "$(sysfs "/sys/class/net/$iface/carrier")" = "1" ] && state=up
 		rx=$(sysfs "/sys/class/net/$iface/statistics/rx_bytes")
 		tx=$(sysfs "/sys/class/net/$iface/statistics/tx_bytes")
 	fi

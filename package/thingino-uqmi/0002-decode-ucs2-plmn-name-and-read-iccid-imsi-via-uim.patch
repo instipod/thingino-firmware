@@ -1,0 +1,249 @@
+From: instipod <instipod@instipod.com>
+Subject: [PATCH] decode UCS-2 PLMN name, read ICCID/IMSI via UIM
+
+The current PLMN description in NAS Get Serving System carries no
+encoding indicator. Sierra Wireless modems send it as UCS-2, which the
+generated parser copies as a C string, so only the first character
+survives. Re-read the raw TLV and convert UCS-2 to UTF-8 when the
+name contains NUL bytes.
+
+Newer modems no longer answer the legacy DMS UIM ICCID/IMSI requests.
+Add --uim-get-iccid and --uim-get-imsi, which read EF ICCID (3F00/2FE2)
+and EF IMSI (ADF/6F07) with UIM Read Transparent.
+
+Signed-off-by: instipod <instipod@instipod.com>
+---
+ uqmi/commands-nas.c |  75 +++++++++++++++++++++++++++++++-
+ uqmi/commands-uim.c | 111 ++++++++++++++++++++++++++++++++++++++++++++++
+ uqmi/commands-uim.h |   5 ++
+ 3 files changed, 190 insertions(+), 1 deletion(-)
+
+--- a/uqmi/commands-nas.c
++++ b/uqmi/commands-nas.c
+@@ -1043,6 +1043,78 @@ cmd_nas_get_signal_info_prepare(struct qmi_dev *qmi, struct qmi_request *req, st
+ 	return QMI_CMD_REQUEST;
+ }
+ 
++static int
++utf8_put(char *out, unsigned int cp)
++{
++	if (cp < 0x80) {
++		out[0] = cp;
++		return 1;
++	}
++	if (cp < 0x800) {
++		out[0] = 0xc0 | (cp >> 6);
++		out[1] = 0x80 | (cp & 0x3f);
++		return 2;
++	}
++	out[0] = 0xe0 | (cp >> 12);
++	out[1] = 0x80 | ((cp >> 6) & 0x3f);
++	out[2] = 0x80 | (cp & 0x3f);
++	return 3;
++}
++
++/*
++ * The current PLMN description carries no encoding indicator and some
++ * modems (e.g. Sierra Wireless) send it as UCS-2, which the generated
++ * parser truncates at the first NUL byte. Re-read the raw TLV and
++ * convert UCS-2 to UTF-8 when it contains NUL bytes.
++ */
++static const char *
++nas_plmn_description(struct qmi_msg *msg, const char *fallback)
++{
++	static char out[3 * 128 + 1];
++	unsigned int buflen = le16_to_cpu(msg->svc.tlv_len);
++	void *buf = msg->svc.tlv;
++	struct tlv *tlv;
++
++	while ((tlv = tlv_get_next(&buf, &buflen)) != NULL) {
++		unsigned int len = tlv_data_len(tlv);
++		unsigned int i, n, ofs = 0, even = 0, odd = 0;
++		uint8_t *d = tlv->data;
++
++		if (tlv->type != 0x12 || len < 5)
++			continue;
++
++		n = d[4];
++		d += 5;
++		if (n > len - 5)
++			n = len - 5;
++
++		for (i = 0; i < n; i++) {
++			if (d[i])
++				continue;
++			if (i & 1)
++				odd++;
++			else
++				even++;
++		}
++		if ((!even && !odd) || n < 2)
++			return fallback;
++
++		for (i = 0; i + 1 < n; i += 2) {
++			unsigned int cp = even > odd ? (d[i] << 8) | d[i + 1] : d[i] | (d[i + 1] << 8);
++
++			if (!cp)
++				break;
++			if (cp >= 0xd800 && cp <= 0xdfff)
++				cp = '?';
++			ofs += utf8_put(out + ofs, cp);
++		}
++		out[ofs] = 0;
++		return out;
++	}
++
++	return fallback;
++}
++
+ static void
+ cmd_nas_get_serving_system_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
+ {
+@@ -1079,7 +1151,8 @@ cmd_nas_get_serving_system_cb(struct qmi_dev *qmi, struct qmi_request *req, stru
+ 		blobmsg_add_u32(&status, "plmn_mcc", res.data.current_plmn.mcc);
+ 		blobmsg_add_u32(&status, "plmn_mnc", res.data.current_plmn.mnc);
+ 		if (res.data.current_plmn.description)
+-			blobmsg_add_string(&status, "plmn_description", res.data.current_plmn.description);
++			blobmsg_add_string(&status, "plmn_description",
++					   nas_plmn_description(msg, res.data.current_plmn.description));
+ 	}
+ 
+ 	if (res.set.roaming_indicator)
+--- a/uqmi/commands-uim.c
++++ b/uqmi/commands-uim.c
+@@ -321,3 +321,114 @@ cmd_uim_send_apdu_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct q
+ 	qmi_set_uim_send_apdu_request(msg, &data);
+ 	return QMI_CMD_REQUEST;
+ }
++
++static uint8_t uim_path_mf[] = { 0x00, 0x3f };
++static uint8_t uim_path_adf[] = { 0x00, 0x3f, 0xff, 0x7f };
++
++static bool
++uim_read_ok(struct qmi_msg *msg, struct qmi_uim_read_transparent_response *res)
++{
++	qmi_parse_uim_read_transparent_response(msg, res);
++	if (res->set.card_result && res->data.card_result.sw1 != 0x90 &&
++	    res->data.card_result.sw1 != 0x91)
++		return false;
++	return res->data.read_result_n > 0;
++}
++
++static void
++uim_add_digit(char *out, unsigned int *ofs, unsigned int max, uint8_t nibble)
++{
++	if (nibble > 9 || *ofs >= max)
++		return;
++	out[(*ofs)++] = '0' + nibble;
++}
++
++static void cmd_uim_get_iccid_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
++{
++	struct qmi_uim_read_transparent_response res;
++	char out[24];
++	unsigned int i, ofs = 0;
++
++	if (!uim_read_ok(msg, &res))
++		return;
++
++	for (i = 0; i < res.data.read_result_n; i++) {
++		uim_add_digit(out, &ofs, sizeof(out) - 1, res.data.read_result[i] & 0x0f);
++		uim_add_digit(out, &ofs, sizeof(out) - 1, res.data.read_result[i] >> 4);
++	}
++	out[ofs] = 0;
++	if (ofs)
++		blobmsg_add_string(&status, NULL, out);
++}
++
++static enum qmi_cmd_result
++cmd_uim_get_iccid_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	struct qmi_uim_read_transparent_request data = {
++		QMI_INIT_SEQUENCE(session,
++			.session_type = uim_slot == 2 ? QMI_UIM_SESSION_TYPE_CARD_SLOT_2 :
++							QMI_UIM_SESSION_TYPE_CARD_SLOT_1,
++			.application_identifier_n = 0
++		),
++		QMI_INIT_SEQUENCE(file,
++			.file_id = 0x2fe2,
++			.file_path_n = ARRAY_SIZE(uim_path_mf),
++			.file_path = uim_path_mf
++		),
++		QMI_INIT_SEQUENCE(read_information,
++			.offset = 0,
++			.length = 0
++		)
++	};
++
++	qmi_set_uim_read_transparent_request(msg, &data);
++	return QMI_CMD_REQUEST;
++}
++
++static void cmd_uim_get_imsi_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
++{
++	struct qmi_uim_read_transparent_response res;
++	uint8_t *d;
++	char out[20];
++	unsigned int i, n, ofs = 0;
++
++	if (!uim_read_ok(msg, &res) || res.data.read_result_n < 2)
++		return;
++
++	d = res.data.read_result;
++	n = d[0];
++	if (n > res.data.read_result_n - 1)
++		n = res.data.read_result_n - 1;
++
++	uim_add_digit(out, &ofs, sizeof(out) - 1, d[1] >> 4);
++	for (i = 2; i <= n; i++) {
++		uim_add_digit(out, &ofs, sizeof(out) - 1, d[i] & 0x0f);
++		uim_add_digit(out, &ofs, sizeof(out) - 1, d[i] >> 4);
++	}
++	out[ofs] = 0;
++	if (ofs)
++		blobmsg_add_string(&status, NULL, out);
++}
++
++static enum qmi_cmd_result
++cmd_uim_get_imsi_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	struct qmi_uim_read_transparent_request data = {
++		QMI_INIT_SEQUENCE(session,
++			.session_type = QMI_UIM_SESSION_TYPE_PRIMARY_GW_PROVISIONING,
++			.application_identifier_n = 0
++		),
++		QMI_INIT_SEQUENCE(file,
++			.file_id = 0x6f07,
++			.file_path_n = ARRAY_SIZE(uim_path_adf),
++			.file_path = uim_path_adf
++		),
++		QMI_INIT_SEQUENCE(read_information,
++			.offset = 0,
++			.length = 0
++		)
++	};
++
++	qmi_set_uim_read_transparent_request(msg, &data);
++	return QMI_CMD_REQUEST;
++}
+--- a/uqmi/commands-uim.h
++++ b/uqmi/commands-uim.h
+@@ -24,6 +24,8 @@
+ 	__uqmi_command(uim_verify_pin1, uim-verify-pin1, required, QMI_SERVICE_UIM), \
+ 	__uqmi_command(uim_verify_pin2, uim-verify-pin2, required, QMI_SERVICE_UIM), \
+ 	__uqmi_command(uim_get_sim_state, uim-get-sim-state, no, QMI_SERVICE_UIM), \
++	__uqmi_command(uim_get_iccid, uim-get-iccid, no, QMI_SERVICE_UIM), \
++	__uqmi_command(uim_get_imsi, uim-get-imsi, no, QMI_SERVICE_UIM), \
+ 	__uqmi_command(uim_power_off, uim-power-off, no, QMI_SERVICE_UIM), \
+ 	__uqmi_command(uim_power_on, uim-power-on, no, QMI_SERVICE_UIM), \
+ 	__uqmi_command(uim_channel_id, uim-channel-id, required, CMD_TYPE_OPTION), \
+@@ -36,6 +38,9 @@
+ 		"  --uim-verify-pin1 <pin>:          Verify PIN1 (new devices)\n" \
+ 		"  --uim-verify-pin2 <pin>:          Verify PIN2 (new devices)\n" \
+ 		"  --uim-get-sim-state:              Get current SIM state\n" \
++		"  --uim-get-iccid:                  Get the ICCID from the SIM card\n" \
++		"    --uim-slot:                     SIM slot [1-2]\n" \
++		"  --uim-get-imsi:                   Get the IMSI from the USIM application\n" \
+ 		"  --uim-power-off:                  Power off SIM card\n" \
+ 		"    --uim-slot:                     SIM slot [1-2]\n" \
+ 		"  --uim-power-on:                   Power on SIM card\n" \
